@@ -1,0 +1,58 @@
+/*
+ * Copyright (C) 2025 Huawei Technologies Co., Ltd. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+rootProject.name = "compose-harmonyos-extensions"
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+
+pluginManagement {
+    repositories {
+        mavenLocal()
+        maven("https://kmp-ohos-test.obs.cn-south-1.myhuaweicloud.com/maven/")
+        maven("https://mirrors.tencent.com/nexus/repository/maven-tencent")
+        maven("https://mirrors.tencent.com/nexus/repository/maven-public")
+        google {
+            mavenContent {
+                includeGroupAndSubgroups("androidx")
+                includeGroupAndSubgroups("com.android")
+                includeGroupAndSubgroups("com.google")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal()
+        maven("https://kmp-ohos-test.obs.cn-south-1.myhuaweicloud.com/maven/")
+        maven("https://mirrors.tencent.com/nexus/repository/maven-tencent")
+        maven("https://mirrors.tencent.com/nexus/repository/maven-public")
+        google {
+            mavenContent {
+                includeGroupAndSubgroups("androidx")
+                includeGroupAndSubgroups("com.android")
+                includeGroupAndSubgroups("com.google")
+            }
+        }
+        mavenCentral()
+    }
+}
+
+include(":breakpoint")
+
+// Core 已经发布到 mavenLocal，不需要 includeBuild
+// 直接通过 Maven 坐标依赖即可
