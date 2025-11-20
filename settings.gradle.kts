@@ -53,6 +53,7 @@ dependencyResolutionManagement {
 }
 
 include(":breakpoint")
+include(":tabs")
 
 // Core 已经发布到 mavenLocal，不需要 includeBuild
 // 直接通过 Maven 坐标依赖即可
