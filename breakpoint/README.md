@@ -1,13 +1,3 @@
-# Compose HarmonyOS Extensions
-
-[![Maven Central](https://img.shields.io/badge/maven-1.0.0-blue)](https://search.maven.org/artifact/com.huawei.compose/breakpoint)
-[![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Platform](https://img.shields.io/badge/platform-Android%20%7C%20HarmonyOS-lightgrey)](https://github.com/huawei/compose-harmonyos-extensions)
-
-Compose Multiplatform extensions providing HarmonyOS-specific capabilities and cross-platform utilities.
-
-## 📦 Modules
-
 ### Breakpoint (`com.huawei.compose:breakpoint:1.0.0`)
 
 Responsive breakpoint system for building adaptive UIs across different screen sizes.
@@ -149,49 +139,3 @@ compose-harmonyos-extensions/
 └── README.md                     # This file
 \`\`\`
 
-## 🔮 Roadmap
-
-### Upcoming Modules
-
-- **arkui-bridge**: ArkTS component integration
-- **distributed**: HarmonyOS distributed capabilities
-- **sensors**: Multi-device sensor support
-- **harmony-extensions**: All-in-one dependency
-
-### Platform Support
-
-- [ ] Complete iOS support
-- [ ] Desktop (JVM) support
-- [ ] Web (Wasm) support
-
-## 📄 License
-
-\`\`\`
-Copyright (C) 2025 Huawei Technologies Co., Ltd.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-     http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-\`\`\`
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📞 Support
-
-- Issues: [GitHub Issues](https://github.com/huawei/compose-harmonyos-extensions/issues)
-- Documentation: [Wiki](https://github.com/huawei/compose-harmonyos-extensions/wiki)
-- Email: support@huawei.com
-
----
-
-**Made with ❤️ by Huawei**

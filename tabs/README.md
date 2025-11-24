@@ -995,9 +995,3 @@ AdaptiveTabRow(
 | 自动适配 | ❌ 需手动判断 | ✅ 自动切换 |
 | 可扩展性 | ⚠️ 中等 | ✅ 高 |
 
----
-
-**文档版本**: 1.0.0
-**更新日期**: 2025-01-20
-**作者**: Compose Multiplatform Team
-**许可**: Apache License 2.0
