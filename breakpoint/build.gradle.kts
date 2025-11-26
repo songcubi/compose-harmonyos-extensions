@@ -28,16 +28,16 @@ kotlin {
     }
 
     // iOS framework 配置暂时禁用，避免与 HarmonyOS 变体冲突
-    // listOf(
-    //     iosX64(),
-    //     iosArm64(),
-    //     iosSimulatorArm64()
-    // ).forEach { iosTarget ->
-    //     iosTarget.binaries.framework {
-    //         baseName = "Breakpoint"
-    //         isStatic = true
-    //     }
-    // }
+     listOf(
+         iosX64(),
+         iosArm64(),
+         iosSimulatorArm64()
+     ).forEach { iosTarget ->
+         iosTarget.binaries.framework {
+             baseName = "Breakpoint"
+             isStatic = true
+         }
+     }
 
     ohosArm64 {
         binaries.sharedLib {
@@ -47,11 +47,11 @@ kotlin {
 
     sourceSets {
         androidMain.dependencies {
-            implementation(libs.androidx.activity.compose)
-            // Android platform needs explicit AndroidX Compose dependencies
-            implementation(libs.compose.ui)
-            implementation(libs.compose.runtime)
-            implementation(libs.compose.foundation)
+//            implementation(libs.androidx.activity.compose)
+//            // Android platform needs explicit AndroidX Compose dependencies
+//            implementation(libs.compose.ui)
+//            implementation(libs.compose.runtime)
+//            implementation(libs.compose.foundation)
         }
 
         commonMain.dependencies {
