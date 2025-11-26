@@ -35,11 +35,6 @@ kotlin {
 
     sourceSets {
         androidMain.dependencies {
-            implementation(libs.androidx.activity.compose)
-            // Android platform needs explicit AndroidX Compose dependencies
-            implementation(libs.compose.ui)
-            implementation(libs.compose.runtime)
-            implementation(libs.compose.foundation)
         }
 
         commonMain.dependencies {

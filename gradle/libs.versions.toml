@@ -1,18 +1,14 @@
 [versions]
 agp = "8.5.2"
 androidx-activityCompose = "1.10.1"
-compose = "1.6.1-ohos-002"
-compose-multiplatform = "1.6.1-ohos-002"
+compose-multiplatform = "1.6.1-KBA-007"
+# 这里填写 ovCompose-multiplatform-core/libraryversions.toml 中 COMPOSE = "xxx" 的版本号，或者是在环境变量中配置的"COMPOSE_CUSTOM_VERSION"值
+compose-multiplatform-core = "1.6.1-SONG-001"
 kotlin = "2.0.21-KBA-005"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
-compose-multiplatform-export = { module = "org.jetbrains.compose.export:export", version.ref = "compose-multiplatform" }
-
-# AndroidX compose, only used by android target.
-compose-ui = { module = "androidx.compose.ui:ui", version.ref = "compose" }
-compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "compose" }
-compose-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "compose" }
+compose-multiplatform-export = { module = "org.jetbrains.compose.export:export", version.ref = "compose-multiplatform-core" }
 
 [plugins]
 androidLibrary = { id = "com.android.library", version.ref = "agp" }
