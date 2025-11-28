@@ -50,6 +50,15 @@ actual class PlatformMediaQuery {
         listenersByCondition.values.toList().forEach { it.forceDestroy() }
         listenersByCondition.clear()
     }
+
+    /**
+     * Public method to update condition state (replaces reflection-based approach)
+     * @param condition Condition string
+     * @param matches New match state
+     */
+    fun updateCondition(condition: String, matches: Boolean) {
+        listenersByCondition[condition]?.updateMatches(matches)
+    }
 }
 
 private class SharedMediaQueryListener(
@@ -133,15 +142,16 @@ private class ProxyMediaQueryListener(
     }
 }
 
-private var globalMediaQuery: PlatformMediaQuery? = null
+/**
+ * CompositionLocal for providing PlatformMediaQuery instance
+ * This replaces the global singleton to prevent memory leaks
+ */
+private val LocalPlatformMediaQuery = staticCompositionLocalOf<PlatformMediaQuery?> { null }
 
 @Composable
 actual fun createMediaQuery(): PlatformMediaQuery {
-    return remember {
-        globalMediaQuery ?: PlatformMediaQuery().also {
-            globalMediaQuery = it
-        }
-    }
+    // Prefer CompositionLocal provided instance, fallback to creating new one
+    return LocalPlatformMediaQuery.current ?: remember { PlatformMediaQuery() }
 }
 
 @Composable
@@ -154,29 +164,21 @@ actual fun rememberMediaQuery(
     val context = LocalContext.current
 
     val mediaQuery = createMediaQuery()
-    val listener = remember(condition) {
+    val listener = remember(condition, mediaQuery) {
         mediaQuery.matchMediaSync(condition)
     }
 
-    // Evaluate condition and update matches
-    LaunchedEffect(configuration, density) {
-        val matches = evaluateMediaQuery(condition, configuration, density.density)
-        (listener as? ProxyMediaQueryListener)?.let {
-            // Update through shared listener
-        }
-        // Find shared listener and update
-        val shared = globalMediaQuery?.let { mq ->
-            try {
-                val field = PlatformMediaQuery::class.java.getDeclaredField("listenersByCondition")
-                field.isAccessible = true
-                @Suppress("UNCHECKED_CAST")
-                val map = field.get(mq) as? Map<String, SharedMediaQueryListener>
-                map?.get(condition)
-            } catch (e: Exception) {
-                null
-            }
-        }
-        shared?.updateMatches(matches)
+    // Evaluate condition and update matches - Fixed dynamic listening
+    LaunchedEffect(
+        condition,
+        configuration.orientation,
+        configuration.uiMode,
+        configuration.screenWidthDp,
+        configuration.screenHeightDp,
+        density.density
+    ) {
+        val matches = evaluateMediaQuery(condition, configuration, context)
+        mediaQuery.updateCondition(condition, matches)
     }
 
     // Register onChange callback
@@ -202,86 +204,70 @@ actual fun rememberMediaQuery(
 }
 
 /**
- * Evaluate media query condition
+ * Evaluate media query condition using the parser
  */
 private fun evaluateMediaQuery(
     condition: String,
     configuration: Configuration,
-    density: Float
+    context: android.content.Context
 ): Boolean {
-    // Parse and evaluate condition
-    return when {
-        // Orientation
-        condition.contains("orientation: landscape") || condition.contains("orientation:landscape") ->
-            configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        condition.contains("orientation: portrait") || condition.contains("orientation:portrait") ->
-            configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    // Parse condition using the new parser
+    val ast = MediaQueryParser.parse(condition) ?: return false
 
-        // Dark mode
-        condition.contains("dark-mode: true") || condition.contains("dark-mode:true") ->
-            (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        condition.contains("dark-mode: false") || condition.contains("dark-mode:false") ->
-            (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_NO
+    // Build media context
+    val displayMetrics = context.resources.displayMetrics
+    val mediaContext = MediaContext(
+        widthDp = configuration.screenWidthDp.toFloat(),
+        heightDp = configuration.screenHeightDp.toFloat(),
+        densityDpi = displayMetrics.densityDpi.toFloat(),
+        orientation = when (configuration.orientation) {
+            Configuration.ORIENTATION_LANDSCAPE -> Orientation.LANDSCAPE
+            else -> Orientation.PORTRAIT
+        },
+        isDarkMode = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES,
+        deviceType = getDeviceType(configuration),
+        isRoundScreen = isRoundScreen(context),
+        deviceWidthDp = configuration.screenWidthDp.toFloat(),
+        deviceHeightDp = configuration.screenHeightDp.toFloat()
+    )
 
-        // Device type
-        condition.contains("device-type: phone") || condition.contains("device-type:phone") ->
-            (configuration.screenLayout and Configuration.SCREENLAYOUT_SIZE_MASK) <= Configuration.SCREENLAYOUT_SIZE_NORMAL
-        condition.contains("device-type: tablet") || condition.contains("device-type:tablet") ->
-            (configuration.screenLayout and Configuration.SCREENLAYOUT_SIZE_MASK) >= Configuration.SCREENLAYOUT_SIZE_LARGE
-        condition.contains("device-type: tv") || condition.contains("device-type:tv") ->
-            (configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+    // Evaluate using AST
+    return evaluate(ast, mediaContext)
+}
 
-        // Width conditions
-        condition.contains("width") -> evaluateWidthCondition(condition, configuration.screenWidthDp.toFloat())
+/**
+ * Determine device type from configuration
+ */
+private fun getDeviceType(configuration: Configuration): DeviceType {
+    // Check UI mode first
+    val uiMode = configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
+    when (uiMode) {
+        Configuration.UI_MODE_TYPE_TELEVISION -> return DeviceType.TV
+        Configuration.UI_MODE_TYPE_CAR -> return DeviceType.CAR
+        Configuration.UI_MODE_TYPE_WATCH -> return DeviceType.WEARABLE
+    }
 
-        // Height conditions
-        condition.contains("height") -> evaluateHeightCondition(condition, configuration.screenHeightDp.toFloat())
-
-        else -> false
+    // Check screen size
+    return when (configuration.screenLayout and Configuration.SCREENLAYOUT_SIZE_MASK) {
+        Configuration.SCREENLAYOUT_SIZE_SMALL,
+        Configuration.SCREENLAYOUT_SIZE_NORMAL -> DeviceType.PHONE
+        Configuration.SCREENLAYOUT_SIZE_LARGE,
+        Configuration.SCREENLAYOUT_SIZE_XLARGE -> DeviceType.TABLET
+        else -> DeviceType.DEFAULT
     }
 }
 
-private fun evaluateWidthCondition(condition: String, widthDp: Float): Boolean {
-    // Parse patterns like (width >= 600vp), (min-width: 600vp), etc.
-    val patterns = listOf(
-        """width\s*>=\s*(\d+)""".toRegex() to { value: Float -> widthDp >= value },
-        """width\s*<=\s*(\d+)""".toRegex() to { value: Float -> widthDp <= value },
-        """width\s*>\s*(\d+)""".toRegex() to { value: Float -> widthDp > value },
-        """width\s*<\s*(\d+)""".toRegex() to { value: Float -> widthDp < value },
-        """min-width\s*:\s*(\d+)""".toRegex() to { value: Float -> widthDp >= value },
-        """max-width\s*:\s*(\d+)""".toRegex() to { value: Float -> widthDp <= value },
-        """width\s*:\s*(\d+)""".toRegex() to { value: Float -> widthDp == value }
-    )
-
-    for ((pattern, evaluator) in patterns) {
-        val match = pattern.find(condition)
-        if (match != null) {
-            val value = match.groupValues[1].toFloatOrNull() ?: continue
-            return evaluator(value)
-        }
+/**
+ * Check if screen is round (for wearables)
+ */
+private fun isRoundScreen(context: android.content.Context): Boolean {
+    return try {
+        // API 23+
+        context.resources.configuration.isScreenRound
+    } catch (e: Exception) {
+        false
     }
-    return false
-}
-
-private fun evaluateHeightCondition(condition: String, heightDp: Float): Boolean {
-    val patterns = listOf(
-        """height\s*>=\s*(\d+)""".toRegex() to { value: Float -> heightDp >= value },
-        """height\s*<=\s*(\d+)""".toRegex() to { value: Float -> heightDp <= value },
-        """height\s*>\s*(\d+)""".toRegex() to { value: Float -> heightDp > value },
-        """height\s*<\s*(\d+)""".toRegex() to { value: Float -> heightDp < value },
-        """min-height\s*:\s*(\d+)""".toRegex() to { value: Float -> heightDp >= value },
-        """max-height\s*:\s*(\d+)""".toRegex() to { value: Float -> heightDp <= value },
-        """height\s*:\s*(\d+)""".toRegex() to { value: Float -> heightDp == value }
-    )
-
-    for ((pattern, evaluator) in patterns) {
-        val match = pattern.find(condition)
-        if (match != null) {
-            val value = match.groupValues[1].toFloatOrNull() ?: continue
-            return evaluator(value)
-        }
-    }
-    return false
 }
 
 // CompositionLocal for shared states - nullable to allow fallback
@@ -293,16 +279,30 @@ private val LocalDeviceTypeState = compositionLocalOf<State<DeviceType>?> { null
 
 @Composable
 actual fun ProvideMediaQueryLocals(content: @Composable () -> Unit) {
-    val isLandscape = rememberMediaQuery("(orientation: landscape)").matches
-    val isDarkMode = rememberMediaQuery("(dark-mode: true)").matches
-    val deviceType = rememberDeviceTypeInternal()
+    // Create PlatformMediaQuery instance with automatic cleanup
+    val platformMediaQuery = remember { PlatformMediaQuery() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            platformMediaQuery.destroy()
+        }
+    }
 
     CompositionLocalProvider(
-        LocalIsLandscapeState provides isLandscape,
-        LocalIsDarkModeState provides isDarkMode,
-        LocalDeviceTypeState provides deviceType,
-        content = content
-    )
+        LocalPlatformMediaQuery provides platformMediaQuery
+    ) {
+        // Create quick query states
+        val isLandscape = rememberMediaQuery("(orientation: landscape)").matches
+        val isDarkMode = rememberMediaQuery("(dark-mode: true)").matches
+        val deviceType = rememberDeviceTypeInternal()
+
+        CompositionLocalProvider(
+            LocalIsLandscapeState provides isLandscape,
+            LocalIsDarkModeState provides isDarkMode,
+            LocalDeviceTypeState provides deviceType,
+            content = content
+        )
+    }
 }
 
 @Composable
@@ -326,13 +326,7 @@ private fun rememberDeviceTypeInternal(): State<DeviceType> {
 
     return remember(configuration) {
         derivedStateOf {
-            when (configuration.screenLayout and Configuration.SCREENLAYOUT_SIZE_MASK) {
-                Configuration.SCREENLAYOUT_SIZE_SMALL,
-                Configuration.SCREENLAYOUT_SIZE_NORMAL -> DeviceType.PHONE
-                Configuration.SCREENLAYOUT_SIZE_LARGE,
-                Configuration.SCREENLAYOUT_SIZE_XLARGE -> DeviceType.TABLET
-                else -> DeviceType.DEFAULT
-            }
+            getDeviceType(configuration)
         }
     }
 }

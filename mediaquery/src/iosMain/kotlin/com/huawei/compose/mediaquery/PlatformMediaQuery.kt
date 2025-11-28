@@ -17,6 +17,9 @@
 package com.huawei.compose.mediaquery
 
 import androidx.compose.runtime.*
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.useContents
+import platform.Foundation.*
 import platform.UIKit.*
 
 /**
@@ -44,6 +47,15 @@ actual class PlatformMediaQuery {
     actual fun destroy() {
         listenersByCondition.values.toList().forEach { it.forceDestroy() }
         listenersByCondition.clear()
+    }
+
+    /**
+     * Public method to update condition state (replaces reflection-based approach)
+     * @param condition Condition string
+     * @param matches New match state
+     */
+    fun updateCondition(condition: String, matches: Boolean) {
+        listenersByCondition[condition]?.updateMatches(matches)
     }
 }
 
@@ -128,15 +140,16 @@ private class ProxyMediaQueryListener(
     }
 }
 
-private var globalMediaQuery: PlatformMediaQuery? = null
+/**
+ * CompositionLocal for providing PlatformMediaQuery instance
+ * This replaces the global singleton to prevent memory leaks
+ */
+private val LocalPlatformMediaQuery = staticCompositionLocalOf<PlatformMediaQuery?> { null }
 
 @Composable
 actual fun createMediaQuery(): PlatformMediaQuery {
-    return remember {
-        globalMediaQuery ?: PlatformMediaQuery().also {
-            globalMediaQuery = it
-        }
-    }
+    // Prefer CompositionLocal provided instance, fallback to creating new one
+    return LocalPlatformMediaQuery.current ?: remember { PlatformMediaQuery() }
 }
 
 @Composable
@@ -145,19 +158,52 @@ actual fun rememberMediaQuery(
     onChange: ((matches: Boolean) -> Unit)?
 ): MediaQueryListener {
     val mediaQuery = createMediaQuery()
-    val listener = remember(condition) {
+    val listener = remember(condition, mediaQuery) {
         mediaQuery.matchMediaSync(condition)
     }
 
-    // Evaluate condition
-    LaunchedEffect(Unit) {
-        val matches = evaluateMediaQueryIOS(condition)
-        // Update through reflection or direct access
-        globalMediaQuery?.let { mq ->
-            // Simple approach: update the shared listener
+    // State for tracking orientation and trait collection changes
+    val orientationState = remember { mutableStateOf(UIDevice.currentDevice.orientation) }
+    val traitCollectionState = remember { mutableStateOf(UIScreen.mainScreen.traitCollection) }
+
+    // Register system notifications for dynamic listening
+    DisposableEffect(Unit) {
+        // Start generating orientation notifications
+        UIDevice.currentDevice.beginGeneratingDeviceOrientationNotifications()
+
+        // Observe orientation changes
+        val orientationObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+            name = UIDeviceOrientationDidChangeNotification,
+            `object` = null,
+            queue = NSOperationQueue.mainQueue
+        ) { _ ->
+            orientationState.value = UIDevice.currentDevice.orientation
+        }
+
+        // Observe trait collection changes (dark mode, etc.)
+        val traitObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+            name = UIContentSizeCategoryDidChangeNotification,
+            `object` = null,
+            queue = NSOperationQueue.mainQueue
+        ) { _ ->
+            traitCollectionState.value = UIScreen.mainScreen.traitCollection
+        }
+
+        onDispose {
+            NSNotificationCenter.defaultCenter.removeObserver(orientationObserver)
+            NSNotificationCenter.defaultCenter.removeObserver(traitObserver)
+            UIDevice.currentDevice.endGeneratingDeviceOrientationNotifications()
         }
     }
 
+    // Evaluate condition and update matches - Fixed dynamic listening
+    LaunchedEffect(condition, orientationState.value, traitCollectionState.value) {
+        val matches = evaluateMediaQuery(condition)
+        // Direct call to public method - no reflection needed
+        mediaQuery.updateCondition(condition, matches)
+    }
+
+    // Register onChange callback
     DisposableEffect(onChange) {
         onChange?.let {
             listener.on("change", it)
@@ -169,6 +215,7 @@ actual fun rememberMediaQuery(
         }
     }
 
+    // Destroy listener when composable leaves composition
     DisposableEffect(listener) {
         onDispose {
             listener.destroy()
@@ -179,79 +226,57 @@ actual fun rememberMediaQuery(
 }
 
 /**
- * Evaluate media query condition for iOS
+ * Evaluate media query condition for iOS using the parser
  */
-private fun evaluateMediaQueryIOS(condition: String): Boolean {
+@OptIn(ExperimentalForeignApi::class)
+private fun evaluateMediaQuery(condition: String): Boolean {
+    // Parse condition using the new parser
+    val ast = MediaQueryParser.parse(condition) ?: return false
+
+    // Build media context
     val device = UIDevice.currentDevice
     val screen = UIScreen.mainScreen
     val traitCollection = screen.traitCollection
+    val bounds = screen.bounds
+    val scale = screen.scale.toFloat()
 
-    return when {
-        // Orientation
-        condition.contains("orientation: landscape") || condition.contains("orientation:landscape") ->
-            device.orientation == UIDeviceOrientationLandscapeLeft ||
-            device.orientation == UIDeviceOrientationLandscapeRight
+    val widthPt = bounds.useContents { this.size.width }.toFloat()
+    val heightPt = bounds.useContents { this.size.height }.toFloat()
 
-        condition.contains("orientation: portrait") || condition.contains("orientation:portrait") ->
-            device.orientation == UIDeviceOrientationPortrait ||
-            device.orientation == UIDeviceOrientationPortraitUpsideDown
+    val mediaContext = MediaContext(
+        widthDp = widthPt,  // iOS uses points, which are equivalent to dp
+        heightDp = heightPt,
+        densityDpi = scale * 160f,  // Convert scale to dpi (160dpi = 1x baseline)
+        orientation = when (device.orientation) {
+            UIDeviceOrientation.UIDeviceOrientationLandscapeLeft,
+            UIDeviceOrientation.UIDeviceOrientationLandscapeRight -> Orientation.LANDSCAPE
 
-        // Dark mode
-        condition.contains("dark-mode: true") || condition.contains("dark-mode:true") ->
-            traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark
-
-        condition.contains("dark-mode: false") || condition.contains("dark-mode:false") ->
-            traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight
-
-        // Device type
-        condition.contains("device-type: phone") || condition.contains("device-type:phone") ->
-            device.userInterfaceIdiom == UIUserInterfaceIdiomPhone
-
-        condition.contains("device-type: tablet") || condition.contains("device-type:tablet") ->
-            device.userInterfaceIdiom == UIUserInterfaceIdiomPad
-
-        condition.contains("device-type: tv") || condition.contains("device-type:tv") ->
-            device.userInterfaceIdiom == UIUserInterfaceIdiomTV
-
-        condition.contains("device-type: car") || condition.contains("device-type:car") ->
-            device.userInterfaceIdiom == UIUserInterfaceIdiomCarPlay
-
-        // Width/Height conditions
-        condition.contains("width") -> {
-            val bounds = screen.bounds
-            val widthPt = bounds.useContents { size.width }.toFloat()
-            evaluateNumericCondition(condition, "width", widthPt)
-        }
-
-        condition.contains("height") -> {
-            val bounds = screen.bounds
-            val heightPt = bounds.useContents { size.height }.toFloat()
-            evaluateNumericCondition(condition, "height", heightPt)
-        }
-
-        else -> false
-    }
-}
-
-private fun evaluateNumericCondition(condition: String, key: String, value: Float): Boolean {
-    val patterns = listOf(
-        """$key\s*>=\s*(\d+)""".toRegex() to { v: Float -> value >= v },
-        """$key\s*<=\s*(\d+)""".toRegex() to { v: Float -> value <= v },
-        """$key\s*>\s*(\d+)""".toRegex() to { v: Float -> value > v },
-        """$key\s*<\s*(\d+)""".toRegex() to { v: Float -> value < v },
-        """min-$key\s*:\s*(\d+)""".toRegex() to { v: Float -> value >= v },
-        """max-$key\s*:\s*(\d+)""".toRegex() to { v: Float -> value <= v },
-        """$key\s*:\s*(\d+)""".toRegex() to { v: Float -> value == v }
+            else -> Orientation.PORTRAIT
+        },
+        isDarkMode = traitCollection.userInterfaceStyle == UIUserInterfaceStyle.UIUserInterfaceStyleDark,
+        deviceType = getDeviceType(device),
+        isRoundScreen = false,  // Round screens only on watchOS, not iOS
+        deviceWidthDp = widthPt,
+        deviceHeightDp = heightPt
     )
 
-    for ((pattern, evaluator) in patterns) {
-        val match = pattern.find(condition)
-        if (match != null) {
-            val num = match.groupValues[1].toFloatOrNull() ?: continue
-            return evaluator(num)
-        }
+    // Evaluate using AST
+    return evaluate(ast, mediaContext)
+}
+
+/**
+ * Determine device type from UIDevice
+ */
+private fun getDeviceType(device: UIDevice): DeviceType {
+    return when (device.userInterfaceIdiom) {
+        UIUserInterfaceIdiomPhone -> DeviceType.PHONE
+        UIUserInterfaceIdiomPad -> DeviceType.TABLET
+        UIUserInterfaceIdiomTV -> DeviceType.TV
+        UIUserInterfaceIdiomCarPlay -> DeviceType.CAR
+        // Note: UIUserInterfaceIdiomWatch is only available in watchOS SDK, not iOS
+        // For iOS apps, we only have Phone/Pad/TV/CarPlay
+        else -> DeviceType.DEFAULT
     }
-    return false
 }
 
 // CompositionLocal for shared states - nullable to allow fallback
@@ -263,16 +288,30 @@ private val LocalDeviceTypeState = compositionLocalOf<State<DeviceType>?> { null
 
 @Composable
 actual fun ProvideMediaQueryLocals(content: @Composable () -> Unit) {
-    val isLandscape = rememberMediaQuery("(orientation: landscape)").matches
-    val isDarkMode = rememberMediaQuery("(dark-mode: true)").matches
-    val deviceType = rememberDeviceTypeInternal()
+    // Create PlatformMediaQuery instance with automatic cleanup
+    val platformMediaQuery = remember { PlatformMediaQuery() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            platformMediaQuery.destroy()
+        }
+    }
 
     CompositionLocalProvider(
-        LocalIsLandscapeState provides isLandscape,
-        LocalIsDarkModeState provides isDarkMode,
-        LocalDeviceTypeState provides deviceType,
-        content = content
-    )
+        LocalPlatformMediaQuery provides platformMediaQuery
+    ) {
+        // Create quick query states
+        val isLandscape = rememberMediaQuery("(orientation: landscape)").matches
+        val isDarkMode = rememberMediaQuery("(dark-mode: true)").matches
+        val deviceType = rememberDeviceTypeInternal()
+
+        CompositionLocalProvider(
+            LocalIsLandscapeState provides isLandscape,
+            LocalIsDarkModeState provides isDarkMode,
+            LocalDeviceTypeState provides deviceType,
+            content = content
+        )
+    }
 }
 
 @Composable
@@ -294,13 +333,7 @@ actual fun rememberDeviceType(): State<DeviceType> {
 private fun rememberDeviceTypeInternal(): State<DeviceType> {
     return remember {
         derivedStateOf {
-            when (UIDevice.currentDevice.userInterfaceIdiom) {
-                UIUserInterfaceIdiomPhone -> DeviceType.PHONE
-                UIUserInterfaceIdiomPad -> DeviceType.TABLET
-                UIUserInterfaceIdiomTV -> DeviceType.TV
-                UIUserInterfaceIdiomCarPlay -> DeviceType.CAR
-                else -> DeviceType.DEFAULT
-            }
+            getDeviceType(UIDevice.currentDevice)
         }
     }
 }

@@ -54,3 +54,4 @@ dependencyResolutionManagement {
 
 include(":breakpoint")
 include(":tabs")
+include(":mediaquery")

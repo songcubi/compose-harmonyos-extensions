@@ -28,16 +28,16 @@ kotlin {
     }
 
     // iOS framework configuration disabled for now
-    // listOf(
-    //     iosX64(),
-    //     iosArm64(),
-    //     iosSimulatorArm64()
-    // ).forEach { iosTarget ->
-    //     iosTarget.binaries.framework {
-    //         baseName = "MediaQuery"
-    //         isStatic = true
-    //     }
-    // }
+    listOf(
+        iosX64(),
+        iosArm64(),
+        iosSimulatorArm64()
+    ).forEach { iosTarget ->
+        iosTarget.binaries.framework {
+            baseName = "MediaQuery"
+            isStatic = true
+        }
+    }
 
     ohosArm64 {
         binaries.sharedLib {

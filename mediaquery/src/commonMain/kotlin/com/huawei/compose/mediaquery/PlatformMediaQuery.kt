@@ -146,8 +146,3 @@ expect fun rememberDeviceType(): State<DeviceType>
  */
 @Composable
 expect fun ProvideMediaQueryLocals(content: @Composable () -> Unit)
-
-/**
- * Exception for media query errors
- */
-class MediaQueryException(message: String, cause: Throwable? = null) : Exception(message, cause)
